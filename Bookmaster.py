@@ -6,6 +6,7 @@
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs
+import os
 
 form = '''<!DOCTYPE html>
   <title>Message Board</title>
@@ -46,6 +47,7 @@ class MessageHandler(BaseHTTPRequestHandler):
         self.wfile.write(form.encode())
 
 if __name__ == '__main__':
-    server_address = ('', 8080)
-    httpd = HTTPServer(server_address, MessageHandler)
+    port = int(os.environ.get('PORT', 8080))  
+    server_address = ('', port)
+    httpd = HTTPServer(server_address, Shortener)
     httpd.serve_forever()
