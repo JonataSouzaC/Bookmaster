@@ -1,112 +1,64 @@
 #!/usr/bin/env python3
-#
-# A *bookmark server* or URI shortener.
+# A demonstration that your browser opens many requests to a server.
 
 import http.server
-import requests
-import os
-from urllib.parse import unquote, parse_qs
+from socketserver import ThreadingMixIn
+import threading
+import time
+import random
 
-memory = {}
-
-form = '''<!DOCTYPE html>
-<title>Bookmark Server</title>
-<form method="POST">
-    <label>Long URI:
-        <input name="longuri">
-    </label>
-    <br>
-    <label>Short name:
-        <input name="shortname">
-    </label>
-    <br>
-    <button type="submit">Save it!</button>
-</form>
-<p>URIs I know about:
-<pre>
-{}
-</pre>
+# HTML main page. This page has 16 iframes, each of which causes
+# the browser to send an additional request to this server.
+# Each iframe will display the number of currently active requests.
+html = '''<!DOCTYPE html>
+<title>Things!</title>
+<style>iframe { width: 23%; border: 0 }</style>
+<iframe src="/frame0"></iframe> <iframe src="/frame1"></iframe>
+<iframe src="/frame2"></iframe> <iframe src="/frame3"></iframe>
+<iframe src="/frame4"></iframe> <iframe src="/frame5"></iframe>
+<iframe src="/frame6"></iframe> <iframe src="/frame7"></iframe>
+<iframe src="/frame8"></iframe> <iframe src="/frame9"></iframe>
+<iframe src="/framea"></iframe> <iframe src="/frameb"></iframe>
+<iframe src="/framec"></iframe> <iframe src="/framed"></iframe>
+<iframe src="/framee"></iframe> <iframe src="/framef"></iframe>
 '''
 
+# Track the number of requests that are in progress.
+# This variable will get +1 every time a handler starts processing
+# a request, and -1 every time it finishes.
+inflight = 0
 
-def CheckURI(uri, timeout=5):
-    '''Check whether this URI is reachable, i.e. does it return a 200 OK?
-    This function returns True if a GET request to uri returns a 200 OK, and
-    False if that GET request returns any other response, or doesn't return
-    (i.e. times out).
-    '''
-    try:
-        r = requests.get(uri, timeout=timeout)
-        # If the GET request returns, was it a 200 OK?
-        return r.status_code == 200
-    except requests.RequestException:
-        # If the GET request raised an exception, it's not OK.
-        return False
+# To protect the inflight variable from being changed from multiple
+# request handlers at once, we need to use a lock.
+lock = threading.Lock()
 
 
-class Shortener(http.server.BaseHTTPRequestHandler):
+class Parallelometer(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
-        # A GET request will either be for / (the root path) or for /some-name.
-        # Strip off the / and we have either empty string or a name.
-        name = unquote(self.path[1:])
-
-        if name:
-            if name in memory:
-                # We know that name! Send a redirect to it.
-                self.send_response(303)
-                self.send_header('Location', memory[name])
-                self.end_headers()
-            else:
-                # We don't know that name! Send a 404 error.
-                self.send_response(404)
-                self.send_header('Content-type', 'text/plain; charset=utf-8')
-                self.end_headers()
-                self.wfile.write("I don't know '{}'.".format(name).encode())
+        global inflight, lock
+        with lock:
+            # We're starting to handle a request.
+            inflight += 1
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/html')
+        self.end_headers()
+        if self.path.startswith('/frame'):
+            # This request is for iframe contents.
+            time.sleep(random.random())  # Slow down by 0-1 seconds.
+            self.wfile.write('{} requests in flight'.format(inflight).encode())
         else:
-            # Root path. Send the form.
-            self.send_response(200)
-            self.send_header('Content-type', 'text/html')
-            self.end_headers()
-            # List the known associations in the form.
-            known = "\n".join("{} : {}".format(key, memory[key])
-                              for key in sorted(memory.keys()))
-            self.wfile.write(form.format(known).encode())
+            # This request is for the main page.
+            self.wfile.write(html.encode())
+            self.wfile.flush()
+        with lock:
+            # We're done handling a request.
+            inflight -= 1
 
-    def do_POST(self):
-        # Decode the form data.
-        length = int(self.headers.get('Content-length', 0))
-        body = self.rfile.read(length).decode()
-        params = parse_qs(body)
 
-        # Check that the user submitted the form fields.
-        if "longuri" not in params or "shortname" not in params:
-            self.send_response(400)
-            self.send_header('Content-type', 'text/plain; charset=utf-8')
-            self.end_headers()
-            self.wfile.write("Missing form fields!".encode())
-            return
-
-        longuri = params["longuri"][0]
-        shortname = params["shortname"][0]
-
-        if CheckURI(longuri):
-            # This URI is good!  Remember it under the specified name.
-            memory[shortname] = longuri
-
-            # Serve a redirect to the form.
-            self.send_response(303)
-            self.send_header('Location', '/')
-            self.end_headers()
-        else:
-            # Didn't successfully fetch the long URI.
-            self.send_response(404)
-            self.send_header('Content-type', 'text/plain; charset=utf-8')
-            self.end_headers()
-            self.wfile.write(
-                "Couldn't fetch URI '{}'. Sorry!".format(longuri).encode())
+class ThreadHTTPServer(ThreadingMixIn, http.server.HTTPServer):
+    pass
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))   # Use PORT if it's there.
-    server_address = ('', port)
-    httpd = http.server.HTTPServer(server_address, Shortener)
+    address = ('', 8000)
+    httpd = ThreadHTTPServer(address, Parallelometer)
     httpd.serve_forever()
