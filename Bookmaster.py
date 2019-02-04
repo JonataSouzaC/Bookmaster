@@ -1,20 +1,22 @@
 #!/usr/bin/env python3
 #
-# Step two in building the messageboard server:
-# A server that handles both GET and POST requests.
-#
+# An HTTP server that's a message board.
 
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import parse_qs
-import os
+
+memory = []
 
 form = '''<!DOCTYPE html>
   <title>Message Board</title>
-  <form method="POST" action="http://localhost:8080/">
+  <form method="POST">
     <textarea name="message"></textarea>
     <br>
     <button type="submit">Post it!</button>
   </form>
+  <pre>
+{}
+  </pre>
 '''
 
 
@@ -23,17 +25,20 @@ class MessageHandler(BaseHTTPRequestHandler):
         # How long was the message?
         length = int(self.headers.get('Content-length', 0))
 
-        # Read the correct amount of data from the request.
+        # Read and parse the message
         data = self.rfile.read(length).decode()
-
-        # Extract the "message" field from the request data.
         message = parse_qs(data)["message"][0]
 
-        # Send the "message" field back as the response.
-        self.send_response(200)
-        self.send_header('Content-type', 'text/plain; charset=utf-8')
+        # Escape HTML tags in the message so users can't break world+dog.
+        message = message.replace("<", "&lt;")
+
+        # Store it in memory.
+        memory.append(message)
+
+        # Send a 303 back to the root page
+        self.send_response(303)  # redirect via GET
+        self.send_header('Location', '/')
         self.end_headers()
-        self.wfile.write(message.encode())
 
     def do_GET(self):
         # First, send a 200 OK response.
@@ -43,11 +48,11 @@ class MessageHandler(BaseHTTPRequestHandler):
         self.send_header('Content-type', 'text/html; charset=utf-8')
         self.end_headers()
 
-        # Then encode and send the form.
-        self.wfile.write(form.encode())
+        # Send the form with the messages in it.
+        mesg = form.format("\n".join(memory))
+        self.wfile.write(mesg.encode())
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 8080))  
-    server_address = ('', port)
+    server_address = ('', 8080)
     httpd = HTTPServer(server_address, MessageHandler)
     httpd.serve_forever()
