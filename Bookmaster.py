@@ -49,5 +49,5 @@ class MessageHandler(BaseHTTPRequestHandler):
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 8080))  
     server_address = ('', port)
-    httpd = HTTPServer(server_address, Handler)
+    httpd = HTTPServer(server_address, MessageHandler)
     httpd.serve_forever()
